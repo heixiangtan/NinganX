@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # 数据库：MySQL 8.0
+  ningan-db:
+    image: mysql:8.0
+    container_name: ningan-mysql
+    restart: always
+    environment:
+      MYSQL_DATABASE: ninganx
+      MYSQL_ROOT_PASSWORD: 123456 # 这里的密码要和 application.yml 一致
+    volumes:
+      - ./mysql_data:/var/lib/mysql        # 数据库持久化，数据不丢失
+      - ./init:/docker-entrypoint-initdb.d # 启动时自动执行setup.sql文件
+    networks:
+      - ningan-net
+    healthcheck: # 健康检查，确保数据库真的能用了
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 5s
+      retries: 10
+
+  ningan-app:
+    build: .
+    image: ningan-x:v1.2
+    container_name: ningan-container
+    restart: always
+    ports:
+      - "2222:2222"          # SSH 蜜罐
+      - "6379:6379"          # Redis 蜜罐
+      - "8080:8080"          # Web 诱饵
+      - "9999:9999"          # 柠安指挥部后台
+    volumes:
+      - ./logs:/app/logs
+      - ./hostkey.ser:/app/hostkey.ser
+      - ./data:/app/data     # 请确保 ip2region.xdb 在宿主机的 ./data 文件夹里
+      - ./alarm_config.json:/app/alarm_config.json # 配置文件持久化
+    environment:
+      - TZ=Asia/Shanghai
+      # 覆盖 Spring 配置，直接指向容器内的数据库服务名
+      - SPRING_DATASOURCE_URL=jdbc:mysql://ningan-db:3306/ninganx?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=123456
+    depends_on:
+      ningan-db:
+        condition: service_healthy # 健康状态检查
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - ningan-net
+    # 启动指令
+    entrypoint: ["java", "-Xms256m", "-Xmx512m", "-Dfile.encoding=UTF-8", "-jar", "app.jar"]
+
+networks:
+  ningan-net:
+    driver: bridge

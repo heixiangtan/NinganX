@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>柠安蜃构 - 后台监控中心</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@4.9.0/map/js/world.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { background: #060608; color: #00f2ff; font-family: 'Segoe UI', sans-serif; letter-spacing: 0.5px; }
+        .cyber-border { border: 1px solid #00f2ff; box-shadow: 0 0 15px rgba(0, 242, 255, 0.1); }
+        .nav-item:hover { background: rgba(0, 242, 255, 0.1); }
+        .active-nav { border-right: 4px solid #00f2ff; background: linear-gradient(to right, rgba(0, 242, 255, 0.1), transparent); color: white; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #00f2ff; }
+        .animate-fade-in { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .level-0 { color: #00f2ff; text-shadow: 0 0 5px rgba(0, 242, 255, 0.3); }
+        .level-1 { color: #ff9d00; text-shadow: 0 0 8px rgba(255, 157, 0, 0.5); font-weight: bold; }
+        .level-2 { color: #ff3333; text-shadow: 0 0 12px rgba(255, 51, 51, 0.8); font-weight: 900; animation: pulse-red 2s infinite; }
+        @keyframes pulse-red { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+        #log-container .time-stamp { color: #88aeb2 !important; font-weight: bold; }
+        #log-container .location-tag { color: #ffffff !important; opacity: 0.95; }
+
+        .neon-tag { border: 1px solid #00444d; padding: 2px 10px; cursor: pointer; transition: all 0.3s; font-size: 10px; text-transform: uppercase; color: #008899; }
+        .neon-tag:hover, .neon-tag.active { background: rgba(0, 242, 255, 0.1); border-color: #00f2ff; color: #00f2ff; box-shadow: 0 0 10px #00f2ff44; }
+        .toggle-dot { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        .alarm-card { background: linear-gradient(135deg, rgba(0,242,255,0.05) 0%, rgba(0,0,0,0.8) 100%); }
+        .cyber-input { background: rgba(0,0,0,0.6); border: 1px solid #00444d; padding: 10px; color: #00f2ff; font-family: monospace; font-size: 12px; }
+        .cyber-input:focus { border-color: #00f2ff; box-shadow: 0 0 10px rgba(0,242,255,0.2); outline: none; }
+
+        .eye-btn { position: absolute; right: 10px; top: 32px; cursor: pointer; color: #00444d; transition: color 0.3s; }
+        .eye-btn:hover { color: #00f2ff; }
+
+        .filter-embed { position: absolute; top: 12px; right: 20px; z-index: 20; display: flex; align-items: center; gap: 8px; }
+
+        .ip-tooltip { position: relative; }
+        .ip-tooltip:hover::after {
+            content: attr(data-info);
+            position: absolute; bottom: 125%; left: 0;
+            background: rgba(10, 10, 15, 0.95); border: 1px solid #00f2ff;
+            color: #00f2ff; padding: 10px 14px; font-size: 11px; white-space: pre;
+            z-index: 100; box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 10px rgba(0,242,255,0.2);
+            pointer-events: none; line-height: 1.6; font-family: monospace; border-radius: 2px;
+        }
+
+        /* 诱饵管理按钮 */
+        .cyber-button-sm { padding: 4px 12px; border: 1px solid #00f2ff; font-size: 10px; font-weight: bold; transition: all 0.3s; }
+        .cyber-button-sm:hover { background: #00f2ff; color: #000; box-shadow: 0 0 15px #00f2ff; }
+    </style>
+</head>
+<body class="h-screen overflow-hidden">
+<div id="app" class="flex h-full">
+    <aside class="w-64 cyber-border bg-black/90 flex flex-col z-10">
+        <div class="p-6 text-2xl font-bold border-b border-cyan-900/50 flex items-center">
+            <i class="fas fa-eye-slash mr-3 text-cyan-400"></i>柠安 X
+        </div>
+        <nav class="flex-1 mt-4">
+            <div v-for="item in menu" :key="item.id" @click="currentTab = item.id"
+                 :class="['nav-item p-4 cursor-pointer transition-all flex items-center', currentTab === item.id ? 'active-nav' : 'text-cyan-800']">
+                <i :class="['fas mr-3 w-6', item.icon]"></i> {{ item.name }}
+            </div>
+        </nav>
+        <div class="p-4 text-[10px] text-cyan-900 border-t border-cyan-900/30">
+            <p>STATUS: ONLINE</p><p>API_PORT: null</p><p>OPERATOR: null</p>
+        </div>
+    </aside>
+
+    <main class="flex-1 p-8 overflow-y-auto bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-900 via-black to-black relative">
+
+        <div v-show="currentTab === 'dashboard'" class="space-y-6 animate-fade-in">
+            <div class="flex justify-between items-start mb-4">
+                <h2 class="text-3xl font-black italic tracking-tighter text-white uppercase">态势大屏 <span class="text-sm text-cyan-700 not-italic ml-2 tracking-widest">// 实时态势感知</span></h2>
+
+                <div class="flex items-center space-x-2 text-[10px] text-cyan-400/80 font-mono pt-2">
+        <span class="relative flex h-1.5 w-1.5">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-cyan-500"></span>
+        </span>
+                    <span class="uppercase tracking-tighter opacity-70">Status: </span>
+                    <span class="font-bold text-cyan-300">SYNC {{ lastSync }}</span>
+                </div>
+            </div>
+            <div class="grid grid-cols-4 gap-6">
+                <div class="cyber-border p-6 bg-black/40 flex flex-col items-center justify-center">
+                    <div class="text-xs text-cyan-700 uppercase">总捕获量</div>
+                    <div class="text-4xl font-mono mt-1 text-white">{{ stats.totalAttacks }}</div>
+                </div>
+
+                <div class="cyber-border p-6 bg-black/40 text-green-400 flex flex-col items-center justify-center">
+                    <div class="text-xs text-cyan-700 uppercase">活跃节点数</div>
+                    <div class="text-4xl font-mono mt-1">{{ activeNodeCount }} / 3</div>
+                </div>
+
+                <div class="cyber-border p-6 bg-black/40 text-red-500 flex flex-col items-center justify-center">
+                    <div class="text-xs text-cyan-700 uppercase">每小时高风险攻击数</div>
+                    <div class="text-4xl font-mono mt-1">{{ highRiskCount }}</div>
+                </div>
+
+                <div class="cyber-border p-6 bg-black/40 flex flex-col items-center justify-center transition-all duration-300"
+                     :class="stats.alarmEnabled ? 'text-cyan-400' : 'text-red-500'">
+                    <div class="text-xs text-cyan-700 uppercase">告警联动</div>
+                    <div class="text-2xl font-mono mt-2 uppercase tracking-widest">
+                        {{ stats.alarmEnabled ? '在线' : '离线' }}
+                    </div>
+                </div>
+            </div>
+            <div class="cyber-border h-[500px] bg-black/60 relative overflow-hidden"><div id="map-container" class="w-full h-full"></div></div>
+        </div>
+
+        <div v-show="currentTab === 'honeypots'" class="space-y-6 animate-fade-in">
+            <h2 class="text-3xl font-bold mb-8 italic text-white uppercase tracking-tighter">诱敌武器 <span class="text-sm text-cyan-700 ml-2">// 蜜罐军械库</span></h2>
+            <div class="grid grid-cols-2 gap-8">
+                <div v-for="h in honeypots" :key="h.name" class="cyber-border p-8 bg-gray-900/20 flex justify-between items-center group hover:bg-cyan-900/10 transition-all">
+                    <div><div class="text-2xl font-mono font-bold text-white tracking-widest uppercase">{{ h.name }}</div><div class="text-sm text-cyan-800 mt-1 italic">协议: TCP | 端口: {{ h.port }}</div></div>
+                    <button @click="toggleHoneypot(h)" :class="['px-8 py-2 rounded-sm font-black text-xs transition-all tracking-widest', h.active ? 'bg-cyan-500 text-black shadow-[0_0_15px_#00f2ff]' : 'bg-red-900/20 text-red-500 border border-red-500']">{{ h.active ? 'DEPLOYED' : 'STANDBY' }}</button>
+                </div>
+            </div>
+        </div>
+
+        <div v-show="currentTab === 'logs'" class="space-y-4 animate-fade-in relative">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-3xl font-bold text-white italic uppercase tracking-tighter">流量审计 <span class="text-sm text-cyan-700 ml-2">// 实时攻击日志</span></h2>
+                <div class="flex gap-2">
+                    <div v-for="tag in ['ALL', 'SSH', 'WEB', 'REDIS']" :key="tag" @click="filter.protocol = tag; resetLogs()" :class="['neon-tag', filter.protocol === tag ? 'active' : '']">[{{ tag }}]</div>
+                </div>
+            </div>
+            <div class="relative">
+                <div class="filter-embed">
+                    <div class="flex items-center bg-black/80 border border-cyan-900/50 px-3 py-1.5 rounded shadow-2xl">
+                        <i class="fas fa-crosshairs text-[10px] text-cyan-600 mr-2"></i>
+                        <input v-model="filter.ip" @keyup.enter="resetLogs" placeholder="探测目标 IP..." class="bg-transparent text-cyan-400 text-[11px] outline-none w-36 font-mono">
+                        <button v-if="filter.ip" @click="clearFilter" class="ml-2 text-red-500 text-[10px] hover:text-red-400 font-black uppercase transition-colors border-l border-cyan-900/30 pl-2">[ RESET ]</button>
+                    </div>
+                </div>
+                <div id="log-container" @scroll="handleScroll" class="cyber-border bg-black/90 font-mono text-[12px] p-6 h-[650px] overflow-y-auto leading-relaxed relative">
+                    <div v-for="log in logs" :key="log.id" class="mb-3 border-b border-cyan-900/5 pb-2 hover:bg-cyan-950/20 transition-all flex items-center group">
+                        <span class="text-cyan-900 mr-2 opacity-50">>></span>
+                        <span class="time-stamp w-20 text-[10px]">[{{ formatTime(log.time) }}]</span>
+                        <span :class="['mx-3 px-2 py-0.5 rounded-sm text-[10px] font-bold tracking-tighter', getProtocolClass(log.protocol)]">{{ log.protocol }}</span>
+                        <span @click="lockIp(log.remoteIp)" :data-info="'[ 入侵者特征 ]\n\n攻击IP: ' + (log.fullLocation || log.location) + '\n攻击次数: ' + (log.attackCount || 1) + ' /次\n本次危害等级: ' + (log.level || 0)"
+                              class="ip-tooltip text-blue-500 font-bold w-32 inline-block cursor-crosshair hover:text-white transition-colors">
+                            {{ log.remoteIp }}
+                        </span>
+                        <span class="location-tag mr-4 w-40 truncate italic opacity-90">@{{ log.location }}</span>
+                        <span :class="['italic transition-all flex-1 tracking-tight', 'level-' + (log.level || 0)]">{{ log.detail }}</span>
+                        <button @click="banIp(log.remoteIp)"
+                                class="opacity-0 group-hover:opacity-100 ml-4 text-red-600 hover:text-red-400 transition-all transform hover:scale-125">
+                            <i class="fas fa-gavel fa-lg" style="filter: drop-shadow(0 0 5px rgba(255,0,0,0.6));"></i>
+                        </button>                    </div>
+                    <div v-if="loading" class="text-center text-cyan-900 py-6 animate-pulse uppercase tracking-[0.3em] text-[10px]">Syncing Data Stream...</div>
+                </div>
+            </div>
+        </div>
+
+        <div v-show="currentTab === 'dissection'" class="h-full flex flex-col space-y-4 animate-fade-in">
+            <h2 class="text-3xl font-bold text-white italic uppercase tracking-tighter">载荷样本 <span class="text-sm text-cyan-700 ml-2">// 一键智能分析</span></h2>
+            <div class="flex-1 flex gap-6 overflow-hidden">
+                <div class="w-80 cyber-border bg-black/60 flex flex-col">
+                    <div class="p-3 border-b border-cyan-900/50 bg-cyan-950/20 text-xs font-bold uppercase tracking-widest text-cyan-400">载荷列表</div>
+                    <div class="flex-1 overflow-y-auto p-2 space-y-2">
+                        <div v-for="p in payloadList" :key="p.id" @click="viewPayload(p)"
+                             :class="['p-3 border cursor-pointer transition-all hover:bg-cyan-900/20', selectedPayload?.id === p.id ? 'border-cyan-400 bg-cyan-900/30' : 'border-cyan-900/30']">
+                            <div class="flex justify-between items-start">
+                                <span class="text-xs font-bold text-blue-400">{{ p.remoteIp }}</span>
+                                <span class="text-[9px] text-cyan-900">{{ (p.size / 1024).toFixed(2) }} KB</span>
+                            </div>
+                            <div class="text-[10px] text-gray-500 mt-1 font-mono">{{ formatTimestamp(p.time) }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex-1 cyber-border bg-black/90 flex flex-col relative overflow-hidden">
+                    <div v-if="selectedPayload" class="flex-1 flex flex-col">
+                        <div class="p-4 border-b border-cyan-900/50 flex justify-between items-center bg-black">
+                            <div class="text-xs text-cyan-400 font-mono"><i class="fas fa-file-code mr-2"></i>{{ selectedPayload.id }}</div>
+                            <div class="flex gap-4">
+                                <button @click="analyzeWithAI" :disabled="analyzing"
+                                        class="text-[10px] text-yellow-500 hover:text-yellow-400 uppercase flex items-center gap-1 transition-all">
+                                    <i :class="['fas', analyzing ? 'fa-spinner fa-spin' : 'fa-robot']"></i>
+                                    {{ analyzing ? 'Analyzing...' : '[ AI 分析 ]' }}
+                                </button>
+                                <button @click="copyContent" class="text-[10px] text-cyan-700 hover:text-cyan-400 uppercase">[ Copy Raw ]</button>
+                            </div>
+                        </div>
+                        <pre class="flex-1 p-6 overflow-auto text-green-500 font-mono text-xs leading-relaxed selection:bg-cyan-500 selection:text-black">{{ decodedContent }}</pre>
+
+                        <div v-if="aiReport" class="absolute bottom-6 right-6 w-80 bg-black/90 border border-yellow-500/50 p-4 animate-fade-in shadow-[0_0_20px_rgba(234,179,8,0.2)]">
+                            <div class="text-[10px] text-yellow-500 font-black mb-2 flex justify-between">
+                                <span>AI COMMANDER REPORT</span>
+                                <i @click="aiReport = null" class="fas fa-times cursor-pointer hover:text-white"></i>
+                            </div>
+                            <div class="text-xs text-gray-200 leading-relaxed font-mono whitespace-pre-wrap">{{ aiReport }}</div>
+                        </div>
+                    </div>
+                    <div v-else class="flex-1 flex items-center justify-center text-cyan-900 italic uppercase tracking-[0.5em]">Select a specimen for analysis...</div>
+                </div>
+            </div>
+        </div>
+
+        <div v-show="currentTab === 'arsenal'" class="space-y-6 animate-fade-in">
+            <div class="flex justify-between items-end mb-4">
+                <h2 class="text-3xl font-black italic tracking-tighter text-white uppercase">
+                    主动防御 <span class="text-sm text-cyan-500 not-italic ml-2 tracking-widest">// 诱饵弹库</span>
+                </h2>
+                <button @click="openDeployModal" class="cyber-button-sm text-green-500 border-green-900 bg-green-900/10">
+                    [ + ] 投放新诱饵
+                </button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div v-for="t in arsenalList" :key="t.id" class="cyber-border bg-black/60 p-6 relative group overflow-hidden transition-all hover:bg-cyan-900/5">
+                    <div class="flex justify-between mb-3">
+                        <span class="text-[10px] bg-cyan-900/50 text-cyan-400 px-2 py-0.5 rounded uppercase font-bold tracking-widest">{{ t.tokenType }}</span>
+                        <span :class="t.triggeredCount > 0 ? 'text-red-500 animate-pulse' : 'text-cyan-900'">
+                            <i class="fas fa-crosshairs mr-1"></i> {{ t.triggeredCount }} TRIGGERS
+                        </span>
+                    </div>
+                    <div class="text-lg font-mono text-white mb-2 truncate select-all">{{ t.tokenValue }}</div>
+                    <div class="text-[10px] text-cyan-800 mb-4 italic">COMMENT: {{ t.comment || '无备注' }}</div>
+                    <div class="flex gap-4 border-t border-cyan-900/30 pt-3">
+                        <button @click="copyText(t.tokenValue)" class="text-[10px] text-cyan-500 hover:text-white uppercase font-black transition-colors">
+                            [ COPY TOKEN ]
+                        </button>
+
+                        <button @click="deleteBait(t.id)" class="text-[10px] text-red-900 hover:text-red-500 uppercase font-black transition-colors ml-auto">
+                            [ DESTROY / 销毁 ]
+                        </button>
+                    </div>
+                    <i class="fas fa-biohazard absolute -bottom-4 -right-4 text-6xl text-white/5 group-hover:text-cyan-500/10 transition-all duration-700"></i>
+                </div>
+                <div v-if="arsenalList.length === 0" class="col-span-full py-20 text-center text-cyan-900 italic uppercase tracking-[0.5em] border border-dashed border-cyan-900/30">
+                    Arsenal is currently empty...
+                </div>
+            </div>
+        </div>
+
+        <div v-show="currentTab === 'blacklist'" class="space-y-6 animate-fade-in">
+            <div class="flex justify-between items-end mb-4">
+                <h2 class="text-3xl font-black italic tracking-tighter text-white uppercase">
+                    风险隔离 <span class="text-sm text-cyan-500 not-italic ml-2 tracking-widest">// IP封禁列表</span>
+                </h2>
+                <div class="text-[10px] text-red-900 font-mono uppercase tracking-widest animate-pulse">
+                    Total Detained: {{ blacklist.length }} Units
+                </div>
+            </div>
+            <div class="cyber-border bg-black/80 overflow-hidden">
+                <table class="w-full text-left font-mono text-xs">
+                    <thead>
+                    <tr class="bg-red-950/20 text-red-500 border-b border-red-900/50">
+                        <th class="p-4 uppercase tracking-widest">入侵IP</th>
+                        <th class="p-4 uppercase tracking-widest">封禁模式</th>
+                        <th class="p-4 uppercase tracking-widest">封禁时间</th>
+                        <th class="p-4 uppercase tracking-widest text-right">操作</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr v-for="b in blacklist" :key="b.ip" class="border-b border-red-900/10 hover:bg-red-900/10 transition-colors group">
+                        <td class="p-4 text-white font-bold">{{ b.ip }}</td>
+                        <td class="p-4 text-red-400 italic">{{ b.reason || '恶意入侵尝试' }}</td>
+                        <td class="p-4 text-gray-500">{{ formatTimestamp(b.time || b.bannedTime) }}</td>
+                        <td class="p-4 text-right">
+                            <button @click="pardonIp(b.ip)" class="text-[10px] text-gray-600 hover:text-green-500 transition-colors">
+                                [ 解除封禁 ]
+                            </button>
+                        </td>
+                    </tr>
+                    <tr v-if="blacklist.length === 0">
+                        <td colspan="4" class="p-10 text-center text-cyan-900 italic tracking-[0.5em]">No prisoners in custody...</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div v-show="currentTab === 'alarm'" class="space-y-6 animate-fade-in">
+            <h2 class="text-3xl font-bold mb-8 italic uppercase tracking-tighter text-white">告警中心 <span class="text-sm text-cyan-700 ml-2 tracking-widest">// 告警参谋部</span></h2>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div class="cyber-border p-8 alarm-card space-y-6">
+                    <div class="flex items-center justify-between border-b border-cyan-900 pb-4">
+                        <div class="flex items-center">
+                            <i class="fab fa-dingtalk text-3xl text-cyan-400 mr-4"></i>
+                            <div><h3 class="font-bold text-xl text-white">钉钉机器人 (DingTalk)</h3><p class="text-[10px] text-cyan-800 italic">Webhook 实时推送</p></div>
+                        </div>
+                        <div @click="alarmConfig.enabled = !alarmConfig.enabled" :class="['w-12 h-6 rounded-full cursor-pointer p-1 transition-all', alarmConfig.enabled ? 'bg-cyan-500/30 border border-cyan-400' : 'bg-gray-800 border border-gray-700']">
+                            <div :class="['w-4 h-4 rounded-full bg-white toggle-dot transform', alarmConfig.enabled ? 'translate-x-6 bg-cyan-400' : 'translate-x-0']"></div>
+                        </div>
+                    </div>
+                    <div class="space-y-4">
+                        <div class="relative">
+                            <label class="text-[10px] text-cyan-700 uppercase block mb-1">Access Token</label>
+                            <input v-model="alarmConfig.token" :type="showToken ? 'text' : 'password'" class="cyber-input w-full pr-10">
+                            <i @click="showToken = !showToken" :class="['fas eye-btn', showToken ? 'fa-eye' : 'fa-eye-slash']"></i>
+                        </div>
+                        <div class="relative">
+                            <label class="text-[10px] text-cyan-700 uppercase block mb-1">Security Secret</label>
+                            <input v-model="alarmConfig.secret" :type="showSecret ? 'text' : 'password'" class="cyber-input w-full pr-10">
+                            <i @click="showSecret = !showSecret" :class="['fas eye-btn', showSecret ? 'fa-eye' : 'fa-eye-slash']"></i>
+                        </div>
+                        <button @click="saveAlarmConfig" class="neon-tag w-full py-3 font-bold">保存并同步配置</button>
+                    </div>
+                </div>
+                <div class="cyber-border p-8 alarm-card space-y-6">
+                    <h3 class="font-bold text-xl border-b border-cyan-900 pb-4 text-white uppercase tracking-widest"><i class="fas fa-tower-broadcast mr-3 text-cyan-400"></i> 规则</h3>
+                    <div class="space-y-6">
+                        <div v-for="(val, key) in alarmConfig.rules" :key="key" class="flex justify-between items-center group">
+                            <div><div class="text-sm font-bold text-gray-200 uppercase tracking-widest">{{ getRuleName(key) }}</div><div class="text-[10px] text-cyan-800 italic">{{ getRuleDesc(key) }}</div></div>
+                            <div @click="alarmConfig.rules[key] = !alarmConfig.rules[key]" :class="['w-10 h-5 rounded-full cursor-pointer p-1 transition-all', alarmConfig.rules[key] ? 'bg-cyan-500/20 border border-cyan-500' : 'bg-gray-900 border border-gray-700']">
+                                <div :class="['w-3 h-3 rounded-full bg-white toggle-dot transform', alarmConfig.rules[key] ? 'translate-x-5' : 'translate-x-0']"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-show="currentTab === 'settings'" class="space-y-8 animate-fade-in">
+            <h2 class="text-3xl font-bold mb-8 italic text-white uppercase tracking-tighter">系统设置 <span class="text-sm text-cyan-700 ml-2">// 系统指挥台</span></h2>
+            <div class="cyber-border p-8 bg-black/60 max-w-2xl">
+                <div class="flex justify-between items-center">
+                    <div><div class="text-xl font-bold text-cyan-400 uppercase tracking-widest font-mono">IPS - 自动防御策略</div><div class="text-sm text-cyan-900 mt-2 italic">开启后，检测到高频访问将自动封锁IP，以防DOS攻击</div></div>
+                    <div @click="toggleDefender" :class="['w-14 h-7 rounded-full cursor-pointer p-1 border border-cyan-900/50', defenderEnabled ? 'bg-cyan-500/30' : 'bg-gray-900']">
+                        <div :class="['w-5 h-5 rounded-full bg-white toggle-dot transform', defenderEnabled ? 'translate-x-7 bg-cyan-400' : 'translate-x-0']"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="showDeployModal" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div class="cyber-border bg-black w-full max-w-md p-6 space-y-6">
+                <div class="flex justify-between items-center border-b border-cyan-900 pb-3">
+                    <h3 class="text-xl font-black italic text-white uppercase tracking-widest">投放新诱饵</h3>
+                    <i @click="showDeployModal = false" class="fas fa-times cursor-pointer text-cyan-900 hover:text-red-500 transition-colors"></i>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="text-[10px] text-cyan-700 uppercase mb-1 block">诱饵类型</label>
+                        <select v-model="newBait.type" class="cyber-input w-full uppercase">
+                            <option value="SSH_KEY">SSH 私钥诱饵</option>
+                            <option value="REDIS_PASS">REDIS 数据库凭据</option>
+                            <option value="AWS_ACCESS">AWS 访问密钥</option>
+                            <option value="CONFIG_FILE">环境变量配置文件</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-cyan-700 uppercase mb-1 block">任务备注</label>
+                        <textarea v-model="newBait.comment" class="cyber-input w-full h-24" placeholder="输入诱饵备注，方便溯源识别..."></textarea>
+                    </div>
+                </div>
+                <div class="flex gap-4">
+                    <button @click="submitDeploy" class="neon-tag flex-1 py-3 font-bold">确认部署</button>
+                    <button @click="showDeployModal = false" class="text-[10px] text-gray-600 uppercase hover:text-white transition-colors">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<script>
+    const { createApp, ref, onMounted, computed, watch } = Vue;
+    createApp({
+        setup() {
+            const currentTab = ref('dashboard');
+            const logs = ref([]);
+            const loading = ref(false);
+            const hasMore = ref(true);
+            const page = ref(1);
+            const filter = ref({ protocol: 'ALL', ip: '' });
+            const stats = ref({ totalAttacks: 0 });
+            const lastSync = ref('--:--:--');
+            const defenderEnabled = ref(true);
+            const showToken = ref(false);
+            const showSecret = ref(false);
+            const alarmConfig = ref({ enabled: false, token: '', secret: '', rules: { highRisk: true, ipsBan: true, dailySummary: false } });
+
+            // 文件分析与 AI 诊断数据
+            const payloadList = ref([]);
+            const selectedPayload = ref(null);
+            const decodedContent = ref('');
+            const analyzing = ref(false);
+            const aiReport = ref(null);
+
+            // 封禁列表数据
+            const blacklist = ref([]);
+
+            // 诱饵管理数据
+            const arsenalList = ref([]);
+            const showDeployModal = ref(false);
+            const newBait = ref({ type: 'SSH_KEY', comment: '' });
+
+            const honeypots = ref([
+                { name: 'SSH', 端口: 2222, active: true },
+                { name: 'REDIS', 端口: 6379, active: true },
+                { name: 'WEB', 端口: 8080, active: true }
+            ]);
+
+            const menu = [
+                { id: 'dashboard', name: '态势感知', icon: 'fa-project-diagram' },
+                { id: 'logs', name: '流量审计', icon: 'fa-fingerprint' },
+                { id: 'dissection', name: '样本分析', icon: 'fa-microscope' },
+                { id: 'honeypots', name: '蜜罐管理', icon: 'fa-shield-virus' },
+                // { id: 'arsenal', name: '诱饵管理', icon: 'fa-box-open' },
+                { id: 'blacklist', name: '封禁列表', icon: 'fa-user-slash' },
+                { id: 'alarm', name: '告警设置', icon: 'fa-satellite-dish' },
+                { id: 'settings', name: '系统设置', icon: 'fa-microchip' }
+            ];
+
+            const centralCoord = [113.26, 23.12];
+            let mapChart = null;
+
+            const fetchLogs = async (isNew = false) => {
+                if (loading.value || (!hasMore.value && !isNew)) return;
+                loading.value = true;
+                if (isNew) { page.value = 1; logs.value = []; hasMore.value = true; }
+                try {
+                    const res = await fetch(`/api/admin/logs/search?protocol=${filter.value.protocol}&ip=${filter.value.ip}&page=${page.value}`);
+                    const data = await res.json();
+                    logs.value = isNew ? data.list : [...logs.value, ...data.list];
+                    hasMore.value = data.hasMore;
+                    if (data.list.length > 0) page.value++;
+                } catch (e) {}
+                loading.value = false;
+            };
+
+            const resetLogs = () => fetchLogs(true);
+
+            // 文件分析列表加载
+            const fetchPayloads = async () => {
+                try {
+                    const res = await fetch('/api/admin/payloads/list');
+                    payloadList.value = await res.json();
+                } catch (e) {}
+            };
+
+            // 查看载荷详情
+            const viewPayload = async (p) => {
+                selectedPayload.value = p;
+                aiReport.value = null;
+                try {
+                    const res = await fetch(`/api/admin/payloads/detail?id=${p.id}`);
+                    const data = await res.json();
+                    decodedContent.value = atob(data.raw);
+                } catch (e) { decodedContent.value = "Specimen extraction failed..."; }
+            };
+
+            // AI 诊断逻辑
+            const analyzeWithAI = async () => {
+                if (!selectedPayload.value) return;
+                analyzing.value = true;
+                aiReport.value = '';
+
+                try {
+                    const response = await fetch('/api/admin/ai/analyze', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: selectedPayload.value.id })
+                    });
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = ''; // 暂存未处理完的缓冲区
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        // 将接收到的二进制流转为文字，并存入缓冲区
+                        buffer += decoder.decode(value, { stream: true });
+
+                        // 按行分割处理
+                        const lines = buffer.split('\n');
+
+                        buffer = lines.pop();
+
+                        for (const line of lines) {
+                            const cleanLine = line.trim();
+                            if (cleanLine.startsWith('data:')) {
+                                const content = cleanLine.substring(5); // 截取 data
+                                if (content) {
+                                    aiReport.value += content;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error(e);
+                    aiReport.value = "❌ 信号传输遭遇强干扰...";
+                } finally {
+                    analyzing.value = false;
+                }
+            };
+
+            // 封禁管理
+            const fetchBlacklist = async () => {
+                try {
+                    const res = await fetch('/api/admin/blacklist/list');
+                    blacklist.value = await res.json();
+                } catch (e) {}
+            };
+
+            const pardonIp = async (ip) => {
+                if(!confirm(`管理员，确定要下达特赦令解封 ${ip} ？`)) return;
+                try {
+                    await fetch(`/api/admin/blacklist/pardon?ip=${ip}`, { method: 'POST' });
+                    fetchBlacklist();
+                } catch (e) {}
+            };
+
+            // 诱饵管理
+            const fetchArsenal = async () => {
+                try {
+                    const res = await fetch('/api/admin/arsenal/list');
+                    arsenalList.value = await res.json();
+                } catch (e) {}
+            };
+
+            const openDeployModal = () => {
+                newBait.value = { type: 'SSH_KEY', comment: '' };
+                showDeployModal.value = true;
+            };
+
+            const submitDeploy = async () => {
+                try {
+                    const res = await fetch('/api/admin/arsenal/deploy', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(newBait.value)
+                    });
+                    if (res.ok) {
+                        alert(" 报告管理员！诱饵已成功部署！️");
+                        showDeployModal.value = false;
+                        fetchArsenal();
+                    }
+                } catch (e) { alert("❌ 部署失败！"); }
+            };
+
+            // 删除诱饵方法
+            const deleteBait = async (id) => {
+                if (!confirm("⚠️ 警告：强制销毁该诱饵将导致相关溯源链路永久失效，确认执行？")) return;
+                try {
+                    const res = await fetch('/api/admin/arsenal/remove', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: id })
+                    });
+                    if (res.ok) {
+                        alert("报告管理员！地雷已成功拆除！️");
+                        fetchArsenal();
+                    }
+                } catch (e) { alert("❌ 销毁失败！"); }
+            };
+
+            const copyText = (text) => {
+                navigator.clipboard.writeText(text);
+                alert("诱饵特征码已复制到剪贴板！");
+            };
+
+            // 格式化相关
+            const formatTimestamp = (ts) => {
+                if (!ts) return '--';
+                const date = new Date(ts);
+                return date.toLocaleString();
+            };
+            const copyContent = () => { navigator.clipboard.writeText(decodedContent.value); alert("物证原始载荷已复制！️"); };
+
+            const syncStats = async () => {
+                try {
+                    const res = await fetch('/api/admin/dashboard/stats');
+                    const data = await res.json();
+                    stats.value = data;
+
+                    // 让独立变量同步后端返回的 alarmEnabled 状态
+                    if (data.hasOwnProperty('alarmEnabled')) {
+                        defenderEnabled.value = data.alarmEnabled;
+                    }
+
+                    lastSync.value = new Date().toLocaleTimeString();
+                    if (currentTab.value === 'dashboard') updateMap(logs.value.slice(0, 15));
+                } catch (e) {
+                    console.error("❌ 态势同步遭遇干扰：", e);
+                }
+            };
+
+            const fetchAlarmConfig = async () => {
+                try {
+                    const res = await fetch('/api/admin/config/alarm');
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (!data.rules) data.rules = { highRisk: true, ipsBan: true, dailySummary: false };
+                        alarmConfig.value = data;
+                    }
+                } catch (e) {}
+            };
+
+            const saveAlarmConfig = async () => {
+                const res = await fetch('/api/admin/config/alarm/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(alarmConfig.value)
+                });
+                if (res.ok) alert("✅ 告警配置已同步！");
+            };
+
+            const handleScroll = (e) => {
+                const { scrollTop, clientHeight, scrollHeight } = e.target;
+                if (scrollTop + clientHeight >= scrollHeight - 50) fetchLogs();
+            };
+
+            const toggleDefender = async () => {
+                const newState = !defenderEnabled.value;
+                const res = await fetch(`/api/admin/config/defender/toggle?enabled=${newState}`, { method: 'POST' });
+                if (res.ok) defenderEnabled.value = newState;
+            };
+
+            const toggleHoneypot = async (h) => {
+                const action = !h.active;
+                const res = await fetch(`/api/admin/honeypot/toggle?name=${h.name}&action=${action}`, { method: 'POST' });
+                if (res.ok) h.active = action;
+            };
+
+            const lockIp = (ip) => { filter.value.ip = ip; currentTab.value = 'logs'; resetLogs(); };
+            const clearFilter = () => { filter.value.ip = ''; resetLogs(); };
+            const banIp = async (ip) => {
+                if(confirm(`确定封禁该攻击者 IP: ${ip} ？`)) {
+                    await fetch(`/api/admin/defender/ban?ip=${ip}`, { method: 'POST' });
+                    resetLogs();
+                }
+            };
+
+            watch(currentTab, (newTab) => {
+                if (newTab === 'logs') resetLogs();
+                if (newTab === 'alarm') fetchAlarmConfig();
+                if (newTab === 'dissection') fetchPayloads();
+                if (newTab === 'blacklist') fetchBlacklist();
+                if (newTab === 'arsenal') fetchArsenal();
+                if (newTab !== 'dissection') { aiReport.value = null; analyzing.value = false; }
+            });
+
+            const initMap = () => {
+                const dom = document.getElementById('map-container');
+                if (!dom) return;
+                mapChart = echarts.init(dom, 'dark');
+                mapChart.setOption({
+                    backgroundColor: 'transparent',
+                    geo: { map: 'world', roam: true, itemStyle: { areaColor: 'rgba(0, 48, 73, 0.4)', borderColor: '#00f2ff', borderWidth: 0.6 } },
+                    series: [
+                        { type: 'effectScatter', coordinateSystem: 'geo', data: [], symbolSize: 10, rippleEffect: { brushType: 'stroke', scale: 4 }, zlevel: 1 },
+                        { type: 'lines', coordinateSystem: 'geo', zlevel: 2, effect: { show: true, period: 4, trailLength: 0.4, color: '#fff', symbolSize: 3 }, lineStyle: { normal: { color: '#ff3333', width: 1, curveness: 0.3 } }, data: [] }
+                    ]
+                });
+            };
+
+            const updateMap = (data) => {
+                if (!mapChart) return;
+                const pts = data.filter(l => l.lng !== 0).map(l => {
+                    let finalLng = l.lng;
+                    let finalLat = l.lat;
+
+                    if (l.lng === 113.722 && l.lat === 34.7732) {
+                        finalLng = 119.5473;
+                        finalLat = 26.6656;
+                    }
+
+                    return {
+                        name: l.remoteIp,
+                        value: [finalLng, finalLat, 1],
+                        itemStyle: { color: l.level === 2 ? '#ff3333' : '#00f2ff' }
+                    };
+                });
+
+                const lines = data.filter(l => l.lng !== 0).map(l => {
+                    let finalLng = l.lng;
+                    let finalLat = l.lat;
+                    if (l.lng === 113.722 && l.lat === 34.7732) {
+                        finalLng = 119.5473;
+                        finalLat = 26.6656;
+                    }
+
+                    return {
+                        coords: [[finalLng, finalLat], centralCoord],
+                        lineStyle: { color: l.level === 2 ? '#ff3333' : '#00f2ff' }
+                    };
+                });
+
+                mapChart.setOption({ series: [{ data: pts }, { data: lines }] });
+            };
+
+            onMounted(() => {
+                initMap();
+                setInterval(syncStats, 5000);
+
+                syncStats();
+
+                resetLogs();
+                fetchAlarmConfig();
+            });
+
+            return {
+                currentTab, menu, logs, stats, honeypots, toggleHoneypot, lastSync,
+                activeNodeCount: computed(() => honeypots.value.filter(h => h.active).length),
+                highRiskCount: computed(() => logs.value.filter(l => l.level === 2).length),
+                filter, loading, hasMore, resetLogs, handleScroll, banIp, lockIp, clearFilter,
+                alarmConfig, saveAlarmConfig, showToken, showSecret, defenderEnabled, toggleDefender,
+                payloadList, selectedPayload, viewPayload, decodedContent, formatTimestamp, copyContent,
+                analyzing, analyzeWithAI, aiReport,
+                blacklist, pardonIp, fetchBlacklist,
+                arsenalList, openDeployModal, submitDeploy, fetchArsenal, showDeployModal, newBait, copyText,
+                deleteBait,
+                formatTime: (t) => t ? t.split('T')[1].split('.')[0] : '--',
+                getProtocolClass: (p) => p === 'SSH' ? 'bg-blue-900/40 text-blue-300 border border-blue-500/30' : 'bg-red-900/40 text-red-300 border border-red-500/30',
+                getRuleName: (k) => ({ highRisk: '高危告警', ipsBan: '封禁通知', dailySummary: '简报' }[k]),
+                getRuleDesc: (k) => ({ highRisk: '检测到恶意行为触发', ipsBan: 'IPS 封锁成功时', dailySummary: '每日 24H 汇总' }[k])
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
